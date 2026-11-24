@@ -1,0 +1,21 @@
+venv/
+__pycache__/
+*.pyc
+*.bak*
+*.backup*
+app_*.py
+app (*.txt
+liga_*.db
+*.db.backup
+*.xlsx
+*.xls
+fix_*.py
+parche_*.py
+limpiar_*.py
+poner_*.py
+sacar_*.py
+dejar_*.py
+diagnostico_*.py
+arreglar_*.py
+liga_v2*.html
+logo.png
