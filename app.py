@@ -174,7 +174,7 @@ def agregar_jugador_db(dni, nombre, club, categoria, torneo):
     db = get_db()
     db.execute("INSERT INTO jugadores (dni, nombre, club, categoria, torneo, estado) VALUES (?,?,?,?,?, 'ACTIVO') ON CONFLICT(dni) DO UPDATE SET nombre=excluded.nombre, club=excluded.club, categoria=excluded.categoria, torneo=excluded.torneo, estado='ACTIVO'", (dni, nombre, club, categoria, torneo))
     db.commit()
-    JUGADORES[dni] = {"nombre": nombre, "club": club, "categoria": categoria, "torneo": torneo, "estado": "ACTIVO", "estado": r.get("estado","ACTIVO") if isinstance(r, dict) else "ACTIVO"}
+    JUGADORES[dni] = {"nombre": nombre, "club": club, "categoria": categoria, "torneo": torneo, "estado": "ACTIVO"}
 
 def borrar_jugador_db(dni):
     db = get_db()
@@ -355,6 +355,18 @@ th{background:#0a4a2b;color:white}
 .navbar-links a.btn-nav-salir{background:#dc3545}
 .navbar-links a.btn-nav-ingresar{background:#00a650}
 @media(max-width:640px){.navbar-brand span{display:none}.navbar-brand b{font-size:13px}.navbar-links a{padding:7px 8px;font-size:12px}body{padding:68px 10px 10px}}
+
+/* PARCHE CAT - alinear botones */
+.nav-links, .top-nav { display: flex !important; align-items: center !important; gap: 8px !important; }
+.nav-links a, .top-nav a { display: inline-flex !important; align-items: center !important; justify-content: center !important; line-height: 1 !important; padding: 8px 14px !important; margin: 0 !important; box-sizing: border-box; }
+.export-row, .botones-exportar { display: flex !important; gap: 10px !important; width: 100% !important; }
+.export-row a, .botones-exportar a { flex: 0 0 auto !important; display: flex !important; align-items: center !important; justify-content: center !important; text-align: center !important; padding: 12px 8px !important; margin: 0 !important; box-sizing: border-box; white-space: nowrap; }
+
+
+/* PARCHE CAT CENTRAR - 3 botones EXPORTAR al centro */
+.export-row, .botones-exportar { display: flex !important; justify-content: center !important; align-items: center !important; gap: 10px !important; width: 100% !important; flex-wrap: wrap !important; }
+.export-row a, .botones-exportar a { flex: 0 0 auto !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; }
+
 </style>
 <nav class="navbar"><div class="navbar-inner">
 <a class="navbar-brand" href="/"><img src="/logo.png"><span><b>LIGA MENDOCINA</b><span>Autogestion de Jugadores</span></span></a>
@@ -629,9 +641,17 @@ def exportar_jugadores():
     if not session.get("admin"): return redirect("/admin")
     output = io.StringIO()
     w = csv.writer(output)
-    w.writerow(["DNI", "NOMBRE", "CLUB", "CATEGORIA", "TORNEO"])
+    w.writerow(["DNI", "NOMBRE", "CLUB", "CATEGORIA", "TORNEO", "ESTADO_PAGO", "PENDIENTE", "TOTAL_PAGADO"])
+    q2 = request.args.get("q", "").strip().upper()
+    filtro2 = request.args.get("filtro", "todos")
+    _hm = _map_dni_a_habilitado()
     for dni, j in JUGADORES.items():
-        w.writerow([dni, j["nombre"], j["club"], j["categoria"], j["torneo"]])
+        if q2 and not (q2 in str(dni) or q2 in j["nombre"].upper() or q2 in j["club"].upper()):
+            continue
+        _h, _pe, _pa = _hm.get(str(dni),(False,0,0))
+        if filtro2 == "habilitados" and not _h: continue
+        if filtro2 == "pendientes" and _h: continue
+        w.writerow([dni, j["nombre"], j["club"], j["categoria"], j["torneo"], "HABILITADO" if _h else "PENDIENTE", _pe, _pa])
     return Response(output.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=jugadores_liga.csv"})
 
 @app.route("/admin/panel")
@@ -702,7 +722,7 @@ def admin_panel():
     grad_str = ", ".join(grad_parts) if grad_parts else "#eee 0% 100%"
     html += f"<h3 style='margin-top:20px'>🍩 {titulo_torta}</h3><div style='display:flex;gap:20px;align-items:center;flex-wrap:wrap;justify-content:center;background:#fafafa;border-radius:12px;padding:15px'><div style='position:relative;width:170px;height:170px;flex-shrink:0'><div style='width:170px;height:170px;border-radius:50%;background:conic-gradient({grad_str});box-shadow:0 2px 10px rgba(0,0,0,0.15)'></div><div style='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:95px;height:95px;background:white;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:inset 0 0 8px rgba(0,0,0,0.08)'><span style='font-size:11px;color:#888'>TOTAL</span><b style='font-size:17px'>${total_para_torta}</b><span style='font-size:10px;color:#888'>{len(USUARIOS)} jugador(s)</span></div></div><div>{leyenda}</div></div>"
     html += "<h3 style='margin-top:15px'>Por Cargo</h3><table><tr><th>Cargo</th><th>Monto</th><th>Cobrado</th><th>Pendiente</th><th>Pagaron</th></tr>" + filas_cargo + "</table><br>" 
-    html += "<a href='/admin/exportar'><button class='btn-excel'>EXPORTAR A EXCEL / CSV</button></a>"
+    html += "<div style='display:flex;gap:8px;flex-wrap:wrap;justify-content:center;align-items:center;width:100%'><a href='/admin/exportar?filtro=todos'><button class='btn-excel'>EXPORTAR TODOS A EXCEL</button></a><a href='/admin/exportar?filtro=habilitados'><button style='background:#16a34a'>EXPORTAR SOLO HABILITADOS</button></a><a href='/admin/exportar?filtro=pendientes'><button style='background:#dc2626'>EXPORTAR SOLO CON DEUDA</button></a></div>"
     html += "<a href='/admin/jugadores'><button style='background:#0a4a2b'>+ CARGAR NUEVO JUGADOR</button></a>"
     html += "<a href='/admin/clubes'><button style='background:#6a1b9a'>CLUBES - ALTA / BAJA / MODIFICAR</button></a>"
     html += "<a href='/admin/categorias'><button style='background:#007bff'>CATEGORIAS - ALTA / BAJA / MODIFICAR</button></a>"
@@ -735,21 +755,57 @@ def admin_limpiar():
 
 @app.route("/admin/exportar")
 def admin_exportar():
-    if not session.get("admin"): return redirect("/admin")
-    USUARIOS = todos_usuarios()
+    import csv, io
+    from flask import Response
+    filtro2 = request.args.get("filtro", "todos")
+    q2 = request.args.get("q", "").strip().upper()
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["Jugador","DNI","Club","Categoria","Email Padre","Monto Pagado","Estado"])
-    for email, u in USUARIOS.items():
-        jug = JUGADORES.get(u["dni_jugador"], {"nombre":"?","club":"?","categoria":"?"})
-        pagado = sum(c["monto"] for c in get_cargos_pago() if c["id"] in u["pagos"])
-        estado = "HABILITADO" if pagado == sum(c["monto"] for c in get_cargos_pago()) else "PENDIENTE"
-        writer.writerow([jug["nombre"], u["dni_jugador"], jug["club"], jug["categoria"], email, pagado, estado])
-    return Response(output.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=liga_mendocina.csv"})
+    hab_map = _map_dni_a_habilitado()
+    # email por dni_jugador
+    email_por_dni = {}
+    try:
+        for email, u in todos_usuarios().items():
+            email_por_dni[str(u.get("dni_jugador",""))] = email
+    except: pass
+    for dni, jug in JUGADORES.items():
+        hab, pagado, total = hab_map.get(str(dni), (False, 0, 0))
+        estado = "HABILITADO" if hab else "PENDIENTE"
+        if filtro2 == "habilitados" and estado != "HABILITADO": continue
+        if filtro2 == "pendientes" and estado != "PENDIENTE": continue
+        if q2 and not (q2 in str(dni) or q2 in str(jug.get("nombre","")).upper() or q2 in str(jug.get("club","")).upper()): continue
+        writer.writerow([jug.get("nombre",""), dni, jug.get("club",""), jug.get("categoria",""), email_por_dni.get(str(dni),""), pagado, estado])
+    return Response(output.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=pagos.csv"})
+
+
+def _map_dni_a_habilitado():
+    try:
+        cargos = get_cargos_pago()
+    except:
+        cargos = []
+    total = sum(c["monto"] for c in cargos)
+    mapa = {}
+    # primero todos los JUGADORES en 0
+    for dni in JUGADORES.keys():
+        mapa[str(dni)] = (False, 0, total)
+    # despues pisar con lo que realmente pago cada USUARIO
+    try:
+        for u in todos_usuarios().values():
+            dni_j = str(u.get("dni_jugador",""))
+            if not dni_j: continue
+            ids_pagos = u.get("pagos", []) or []
+            pagado = sum(c["monto"] for c in cargos if c["id"] in ids_pagos)
+            hab = (pagado >= total and total > 0)
+            mapa[dni_j] = (hab, pagado, total)
+    except Exception as e:
+        print("map habilitado error", e)
+    return mapa
 
 
 @app.route("/admin/jugadores", methods=["GET","POST"])
 def admin_jugadores():
+
     if not session.get("admin"): return redirect("/admin")
     if request.method == "POST":
         dni = request.form["dni"].strip()
@@ -763,6 +819,7 @@ def admin_jugadores():
 
     # --- BUSCADOR + PAGINADOR ---
     q = request.args.get("q", "").strip().upper()
+    filtro = request.args.get("filtro", "todos")
     page = request.args.get("page", 1, type=int)
     per_page = 10
 
@@ -772,6 +829,11 @@ def admin_jugadores():
     todos.sort(key=lambda x: (1 if x[1].get("estado") == "BAJA" else 0, x[1].get("nombre", "")))
     if q:
         todos = [(dni, j) for dni, j in todos if q in dni or q in j["nombre"].upper() or q in j["club"].upper()]
+    _hab_map = _map_dni_a_habilitado()
+    if filtro == "habilitados":
+        todos = [(dni, j) for dni, j in todos if _hab_map.get(str(dni),(False,0,0))[0]]
+    elif filtro == "pendientes":
+        todos = [(dni, j) for dni, j in todos if not _hab_map.get(str(dni),(False,0,0))[0]]
 
     total = len(todos)
     total_pages = (total + per_page - 1) // per_page
@@ -808,17 +870,19 @@ def admin_jugadores():
         _badge = " <span style='background:#dc3545;color:white;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:900;white-space:nowrap;display:inline-block'>DE BAJA</span>" if _es_baja else " <span style='background:#28a745;color:white;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:900;white-space:nowrap;display:inline-block'>ACTIVO</span>"
         _estilo = " style='background:#ffe0e0'" if _es_baja else ""
         _boton_estado = "<a href='/admin/jugadores/reactivar/" + dni + "'><button style='width:auto;padding:7px 12px;background:#28a745'>✅ REACTIVAR</button></a>" if _es_baja else "<a href='/admin/jugadores/borrar/" + dni + "'><button style='width:auto;padding:7px 12px;background:#dc3545'>DAR DE BAJA</button></a>"
-        filas_j += "<tr" + _estilo + "><td><b>" + j["nombre"] + "</b>" + _badge + "<br><span class='small'>DNI: " + dni + "</span></td><td>" + j["club"] + "</td><td>" + j["categoria"] + "</td><td>" + j["torneo"] + "</td><td><a href='/admin/jugadores/editar/" + dni + "'><button style='width:auto;padding:7px 12px;background:#f0ad4e'>EDITAR</button></a> " + _boton_estado + "</td></tr>"
+        _hab, _pen, _pag = _hab_map.get(str(dni),(False,0,0))
+        _badge_pago = "✅ HABILITADO" if _hab else "❌ PENDIENTE $" + str(_pen)
+        filas_j += "<tr" + _estilo + "><td><b>" + j["nombre"] + "</b>" + _badge + "<br><span class='small'>DNI: " + dni + "</span></td><td>" + j["club"] + "</td><td>" + j["categoria"] + "</td><td>" + j["torneo"] + "</td><td>" + _badge_pago + "</td><td><a href='/admin/jugadores/editar/" + dni + "'><button style='width:auto;padding:7px 12px;background:#f0ad4e'>EDITAR</button></a> " + _boton_estado + "</td></tr>"
 
     # Links paginador
     paginador = ""
     if total_pages > 1:
         paginador += "<div style='display:flex;gap:8px;justify-content:center;margin:20px 0;align-items:center;flex-wrap:wrap;'>"
         if page > 1:
-            paginador += "<a href='/admin/jugadores?q=" + q + "&page=" + str(page-1) + "'><button style='width:auto;padding:8px 14px;background:#eee;color:#333'>⬅ Anterior</button></a>"
+            paginador += "<a href='/admin/jugadores?q=" + q + "&filtro=" + filtro + "&page=" + str(page-1) + "'><button style='width:auto;padding:8px 14px;background:#eee;color:#333'>⬅ Anterior</button></a>"
         paginador += "<span><b>Página " + str(page) + " de " + str(total_pages) + "</b> - " + str(total) + " encontrados</span>"
         if page < total_pages:
-            paginador += "<a href='/admin/jugadores?q=" + q + "&page=" + str(page+1) + "'><button style='width:auto;padding:8px 14px;background:#eee;color:#333'>Siguiente ➡</button></a>"
+            paginador += "<a href='/admin/jugadores?q=" + q + "&filtro=" + filtro + "&page=" + str(page+1) + "'><button style='width:auto;padding:8px 14px;background:#eee;color:#333'>Siguiente ➡</button></a>"
         paginador += "</div>"
 
     return render_template_string(ESTILO + """
@@ -853,9 +917,9 @@ def admin_jugadores():
     </script>
     <h3>Jugadores cargados (""" + str(total) + """)</h3>
     <div style="text-align:center; margin:15px 0;">
-      <a href="/admin/jugadores/exportar" style="display:block; background:#28a745; color:white; padding:18px; border-radius:12px; font-weight:900; text-decoration:none; font-size:18px;">⬇ EXPORTAR A EXCEL - BAJAR TODOS LOS JUGADORES</a>
+      <a href="/admin/jugadores/exportar?q=""" + q + """&filtro=""" + filtro + """" style="display:block; background:#28a745; color:white; padding:18px; border-radius:12px; font-weight:900; text-decoration:none; font-size:18px;">⬇ EXPORTAR A EXCEL - BAJAR JUGADORES FILTRADOS</a>
     </div>
-    <form method="get" style="display:flex;gap:10px;margin:15px 0;">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;"><a href="/admin/jugadores?filtro=todos"><button style="width:auto;padding:10px 14px;background:#0a4a2b">Todos</button></a><a href="/admin/jugadores?filtro=habilitados"><button style="width:auto;padding:10px 14px;background:#16a34a">✅ Solo Habilitados</button></a><a href="/admin/jugadores?filtro=pendientes"><button style="width:auto;padding:10px 14px;background:#dc2626">❌ Con Deuda</button></a></div><form method="get" style="display:flex;gap:10px;margin:15px 0;"><input type="hidden" name="filtro" value="" + filtro + "">
       <input name="q" value=\"""" + q + """\" placeholder="Buscar por DNI, Nombre o Club..." style="flex:1;">
       <button style="width:auto;padding:12px 20px;">🔍 BUSCAR</button>
     </form>
@@ -869,7 +933,7 @@ document.querySelectorAll("table tr").forEach(function(tr){
 });
 </script>
 
-    <table><tr><th>Jugador / DNI</th><th>Club</th><th>Categoria</th><th>Torneo</th><th>Acciones</th></tr>""" + filas_j + """</table>
+    <table><tr><th>Jugador / DNI</th><th>Club</th><th>Categoria</th><th>Torneo</th><th>Estado Pago</th><th>Acciones</th></tr>""" + filas_j + """</table>
     """ + paginador + """
     </div>
     """)
@@ -1321,6 +1385,7 @@ def admin_importar():
 def admin_tutores():
     if not session.get("admin"): return redirect("/admin")
     q = request.args.get("q", "").strip().upper()
+    filtro = request.args.get("filtro", "todos")
 
     # Tutores = usuarios (email + dni_jugador) + datos del jugador en JUGADORES
     db = get_db()
@@ -1376,7 +1441,7 @@ def admin_tutores():
       <a href="/admin">← Volver al Panel</a>
       <h2>👨‍👩‍👧 Tutores</h2>
       <p style="color:#555">Listado de tutores y jugador a su cargo. El tutor restablece su clave solo desde "Olvidé mi clave" en el ingreso.</p>
-      <form method="get" style="margin:12px 0;display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;"><a href="/admin/jugadores?filtro=todos"><button style="width:auto;padding:10px 14px;background:#0a4a2b">Todos</button></a><a href="/admin/jugadores?filtro=habilitados"><button style="width:auto;padding:10px 14px;background:#16a34a">✅ Solo Habilitados</button></a><a href="/admin/jugadores?filtro=pendientes"><button style="width:auto;padding:10px 14px;background:#dc2626">❌ Con Deuda</button></a></div><form method="get" style="margin:12px 0;display:flex;gap:8px">
         <input name="q" value="{q}" placeholder="Buscar por email, jugador o DNI..." style="flex:1;padding:10px;border:1px solid #ccc;border-radius:8px">
         <button style="padding:10px 18px;background:#111827;color:#fff;border:0;border-radius:8px;cursor:pointer">Buscar</button>
       </form>
