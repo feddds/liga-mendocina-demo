@@ -7,7 +7,14 @@ from fpdf import FPDF
 
 app = Flask(__name__)
 app.secret_key = "liga-mendocina-demo-123"
-DB = "liga.db"
+import os
+DATA_DIR = "/data" if os.path.exists("/data") else "."
+DB = os.path.join(DATA_DIR, "liga.db")
+# Migrar base vieja al disco la primera vez
+if DATA_DIR == "/data" and not os.path.exists(DB) and os.path.exists("liga.db"):
+    import shutil
+    shutil.copy("liga.db", DB)
+    print("MIGRADO liga.db a /data")
 
 EMAIL_REMITENTE = "fabiand@didiosistemas.com.ar"
 EMAIL_CLAVE_APP = "iutu skcd dmut zhij"
