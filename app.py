@@ -79,6 +79,7 @@ def init_db():
     db.execute("CREATE TABLE IF NOT EXISTS pagos (email TEXT, cargo_id INTEGER, PRIMARY KEY(email, cargo_id))")
     db.execute("CREATE TABLE IF NOT EXISTS jugadores (dni TEXT PRIMARY KEY, nombre TEXT, club TEXT, categoria TEXT, torneo TEXT)")
     db.execute("CREATE TABLE IF NOT EXISTS clubes (nombre TEXT PRIMARY KEY)")
+    db.execute("CREATE TABLE IF NOT EXISTS clubes_usuarios (club TEXT PRIMARY KEY, usuario TEXT UNIQUE, password TEXT)")
     db.execute("CREATE TABLE IF NOT EXISTS categorias (nombre TEXT PRIMARY KEY)")
     db.execute("CREATE TABLE IF NOT EXISTS cargos (nombre TEXT PRIMARY KEY, monto INTEGER)")
     db.execute("CREATE TABLE IF NOT EXISTS temporadas (nombre TEXT PRIMARY KEY, activa INTEGER DEFAULT 1)")
@@ -193,6 +194,41 @@ def reactivar_jugador_db(dni):
 def get_clubes():
     db = get_db()
     return [r[0] for r in db.execute("SELECT nombre FROM clubes ORDER BY nombre").fetchall()]
+
+
+# --- PARCHE CAT: USUARIOS CLUBES ---
+def slug_club(nombre):
+    n = str(nombre).lower().strip()
+    for a,b in [("á","a"),("é","e"),("í","i"),("ó","o"),("ú","u"),("ñ","n"),("ü","u")]:
+        n = n.replace(a,b)
+    out = ""
+    for ch in n:
+        if ch.isalnum():
+            out += ch
+        elif ch in [" ","-","_","(",")",".","/"]:
+            if not out.endswith("_"):
+                out += "_"
+    return out.strip("_") or "club"
+
+def get_usuario_club(club):
+    db = get_db()
+    try:
+        return db.execute("SELECT * FROM clubes_usuarios WHERE club=?", (club,)).fetchone()
+    except Exception:
+        return None
+
+def crear_usuario_club(club):
+    db = get_db()
+    db.execute("CREATE TABLE IF NOT EXISTS clubes_usuarios (club TEXT PRIMARY KEY, usuario TEXT UNIQUE, password TEXT)")
+    base = slug_club(club)
+    usuario = base
+    i = 2
+    while db.execute("SELECT 1 FROM clubes_usuarios WHERE usuario=?", (usuario,)).fetchone():
+        usuario = f"{base}_{i}"
+        i += 1
+    db.execute("INSERT OR REPLACE INTO clubes_usuarios VALUES (?,?,?)", (club, usuario, "1234"))
+    db.commit()
+    return usuario
 
 def agregar_club_db(nombre):
     db = get_db()
@@ -424,6 +460,15 @@ def login():
     if request.method == "POST":
         email = request.form["email"].lower().strip()
         clave = request.form["password"].strip()
+        # PARCHE CAT: LOGIN CLUB
+        try:
+            row_club = get_db().execute("SELECT * FROM clubes_usuarios WHERE usuario=?", (email,)).fetchone()
+        except Exception:
+            row_club = None
+        if row_club and row_club["password"] == clave:
+            session["club_usuario"] = email
+            session["club"] = row_club["club"]
+            return redirect("/club/panel")
         u = get_usuario(email)
         if u and u["password"] == clave:
             session["email"] = email
@@ -431,7 +476,7 @@ def login():
         return render_template_string(ESTILO + "<div class='card center'><h2>Datos incorrectos</h2><a href='/login'><button class='btn-sec'>Reintentar</button></a></div>")
     return render_template_string(ESTILO + """
     <div class="card"><img src="/logo.png" class="logo-mini"><h2 class="center">Ingresar</h2>
-    <form method="post"><label>Usuario (tu email)</label><input name="email" type="email" required>
+    <form method="post"><label>Usuario (tu email o usuario de club)</label><input name="email" type="text" required>
     <label>Clave</label><input name="password" type="password" required placeholder="Tu DNI">
     <button>INGRESAR</button></form><p style='text-align:center;margin-top:12px'><a href="/olvidado" style='color:#e91e63;font-weight:bold'>¿Olvidaste tu DNI / Clave? Recuperar acá</a></p><a href="/">Volver</a></div>
     """)
@@ -1081,7 +1126,12 @@ def admin_clubes():
     filas_c = ""
     for c in clubes:
         cant = len([j for j in JUGADORES.values() if j["club"] == c])
-        filas_c += "<tr><td><b>" + c + "</b></td><td>" + str(cant) + " jugadores</td><td><a href='/admin/clubes/editar/" + c + "'><button style='width:auto;padding:7px 12px;background:#f0ad4e'>EDITAR</button></a> <a href='/admin/clubes/borrar/" + c + "'><button style='width:auto;padding:7px 12px;background:#dc3545'>DAR DE BAJA</button></a></div></td></tr>"
+        uc = get_usuario_club(c)
+        if uc:
+            btn_club = "<a href='/admin/clubes/usuario/" + c + "'><button style='width:auto;padding:7px 12px;background:#6a1b9a'>USUARIO: " + uc["usuario"] + "</button></a>"
+        else:
+            btn_club = "<a href='/admin/clubes/usuario/" + c + "'><button style='width:auto;padding:7px 12px;background:#6a1b9a'>GENERAR USUARIO</button></a>"
+        filas_c += "<tr><td><b>" + c + "</b></td><td>" + str(cant) + " jugadores</td><td><a href='/admin/clubes/editar/" + c + "'><button style='width:auto;padding:7px 12px;background:#f0ad4e'>EDITAR</button></a> <a href='/admin/clubes/borrar/" + c + "'><button style='width:auto;padding:7px 12px;background:#dc3545'>DAR DE BAJA</button></a> " + btn_club + "</td></tr>"
     return render_template_string(ESTILO + """
     <div class="card" style="max-width:800px"><img src="/logo.png" class="logo-mini">
     <div class="topbar"><h2>ABM Clubes</h2><a href="/admin/panel">Volver al panel</a></div>
@@ -1259,6 +1309,51 @@ def admin_borrar_cargo(nombre):
 
 def admin_salir():
     session.pop("admin", None); return redirect("/")
+
+
+# --- PARCHE CAT: RUTAS CLUB ---
+@app.route("/admin/clubes/usuario/<path:club>", methods=["GET","POST"])
+def admin_generar_usuario_club(club):
+    if not session.get("admin"): return redirect("/admin")
+    if request.method == "POST":
+        usuario = crear_usuario_club(club)
+        return render_template_string(ESTILO + f"<div class='card center'><h2>Usuario creado</h2><p>Club: <b>{club}</b><br>Usuario: <b>{usuario}</b><br>Clave: <b>1234</b></p><p class='small'>Pasale esto al club. Entra en /login con ese usuario.</p><a href='/admin/clubes'><button>Volver a Clubes</button></a></div>")
+    uc = get_usuario_club(club)
+    if uc:
+        return render_template_string(ESTILO + f"<div class='card center'><h2>Usuario del Club</h2><p>Club: <b>{club}</b><br>Usuario: <b>{uc['usuario']}</b><br>Clave actual: <b>{uc['password']}</b></p><form method='post'><button>RESETEAR A 1234</button></form><br><a href='/admin/clubes'>Volver</a></div>")
+    return render_template_string(ESTILO + f"<div class='card center'><h2>Generar Usuario</h2><p>Club: <b>{club}</b><br>Usuario sugerido: <b>{slug_club(club)}</b><br>Clave: <b>1234</b></p><form method='post'><button>GENERAR USUARIO</button></form><br><a href='/admin/clubes'>Cancelar</a></div>")
+
+@app.route("/club/panel")
+def club_panel():
+    usuario = session.get("club_usuario")
+    club = session.get("club")
+    if not usuario: return redirect("/login")
+    hab_map = _map_dni_a_habilitado()
+    filas = ""
+    total_hab = 0
+    for dni, jug in JUGADORES.items():
+        if jug.get("club") != club: continue
+        hab, pagado, total = hab_map.get(str(dni), (False, 0, 0))
+        if not hab: continue
+        total_hab += 1
+        filas += f"<tr><td><b>{jug.get('nombre','')}</b></td><td>{dni}</td><td>{jug.get('categoria','')}</td><td>HABILITADO</td></tr>"
+    return render_template_string(ESTILO + f"<div class='card' style='max-width:900px'><h2>{club}</h2><p>Usuario: <b>{usuario}</b> | Jugadores HABILITADOS: <b>{total_hab}</b></p><div style='text-align:center;margin:15px 0'><a href='/club/exportar' style='display:block;background:#28a745;color:white;padding:18px;border-radius:12px;font-weight:900;text-decoration:none;font-size:18px'>DESCARGAR PLANILLA HABILITADOS</a></div><table><tr><th>Jugador</th><th>DNI</th><th>Categoria</th><th>Estado</th></tr>{filas}</table><br><a href='/logout'><button class='btn-sec'>Salir</button></a></div>")
+
+@app.route("/club/exportar")
+def club_exportar():
+    usuario = session.get("club_usuario")
+    club = session.get("club")
+    if not usuario: return redirect("/login")
+    hab_map = _map_dni_a_habilitado()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Jugador","DNI","Club","Categoria","Estado"])
+    for dni, jug in JUGADORES.items():
+        if jug.get("club") != club: continue
+        hab, pagado, total = hab_map.get(str(dni), (False, 0, 0))
+        if not hab: continue
+        writer.writerow([jug.get("nombre",""), dni, club, jug.get("categoria",""), "HABILITADO"])
+    return Response(output.getvalue(), mimetype="text/csv", headers={"Content-Disposition": f"attachment; filename=habilitados_{slug_club(club)}.csv"})
 
 @app.route("/logout")
 def logout():
